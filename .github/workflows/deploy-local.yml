@@ -18,8 +18,16 @@ jobs:
       - name: Stop old Product API container
         shell: powershell
         run: |
-          docker stop product-api-local 2>$null
-          docker rm product-api-local 2>$null
+          docker stop product-api-local --timeout 10
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Old container does not exist, continue..."
+          }
+
+          docker rm product-api-local
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Old container does not exist, continue..."
+          }
+
           exit 0
 
       - name: Start Product API container
