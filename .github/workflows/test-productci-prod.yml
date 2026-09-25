@@ -1,0 +1,92 @@
+name: Product API CI - MongoDB CRUD
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-product-api:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:8
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: "123456"
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --username admin --password 123456 --authenticationDatabase admin --eval \"db.adminCommand('ping')\""
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 20s
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check JavaScript syntax
+        run: node --check server.js
+
+      - name: Start Product API
+        env:
+          MONGO_URI: mongodb://admin:123456@localhost:27017/productdb?authSource=admin
+          PORT: 3000
+        run: |
+          node server.js > api.log 2>&1 &
+          sleep 10
+
+      - name: Check API health
+        run: |
+          curl --fail http://localhost:3000/health
+
+      - name: Test CREATE product
+        run: |
+          curl --fail --request POST \
+            --header "Content-Type: application/json" \
+            --data '{"pid":"CI001","pname":"CI Test Product","price":100000,"quantity":10}' \
+            http://localhost:3000/products
+
+      - name: Test GET product
+        run: |
+          curl --fail http://localhost:3000/products/CI001
+
+      - name: Test UPDATE product
+        run: |
+          curl --fail --request PUT \
+            --header "Content-Type: application/json" \
+            --data '{"pname":"CI Updated Product","price":200000,"quantity":20}' \
+            http://localhost:3000/products/CI001
+
+      - name: Test GET updated product
+        run: |
+          curl --fail http://localhost:3000/products/CI001
+
+      - name: Test DELETE product
+        run: |
+          curl --fail --request DELETE \
+            http://localhost:3000/products/CI001
+
+      - name: Verify DELETE
+        run: |
+          if curl --silent --fail http://localhost:3000/products/CI001; then
+            echo "ERROR: Product still exists after DELETE"
+            exit 1
+          else
+            echo "DELETE test passed"
+          fi
