@@ -1,0 +1,57 @@
+name: CD - Docker Hub to Local Docker
+
+on:
+  workflow_run:
+    workflows: ["Product API CD - Docker Hub"]
+    types:
+      - completed
+
+jobs:
+  deploy-local:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
+
+    steps:
+      - name: Pull latest image from Docker Hub
+        run: docker pull ntruong05/product-api:latest
+
+      - name: Stop old Product API container
+        shell: powershell
+        run: |
+          docker stop product-api-local 2>$null
+          docker rm product-api-local 2>$null
+          exit 0
+
+      - name: Start Product API container
+        shell: powershell
+        run: |
+          docker run -d `
+            --name product-api-local `
+            --network product-api_product-network `
+            -p 3000:3000 `
+            -e MONGO_URI="mongodb://admin:123456@nammongodb:27017/productdb?authSource=admin" `
+            -e PORT=3000 `
+            ntruong05/product-api:latest
+
+      - name: Wait for Product API
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 10
+
+      - name: Verify Product API health
+        shell: powershell
+        run: |
+          $response = Invoke-RestMethod "http://127.0.0.1:3000/health"
+
+          Write-Host "API status: $($response.status)"
+          Write-Host "Database status: $($response.database)"
+
+          if ($response.status -ne "healthy") {
+            throw "Product API is not healthy"
+          }
+
+          if ($response.database -ne "connected") {
+            throw "Database is not connected"
+          }
+
+          Write-Host "Product API deployment successful"
