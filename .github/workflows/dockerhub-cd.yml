@@ -1,0 +1,93 @@
+name: Product API CD - Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check JavaScript syntax
+        run: node --check server.js
+
+      - name: Build Docker image
+        run: docker build -t ntruong05/product-api:latest .
+
+      - name: Start MongoDB for health test
+        run: |
+          docker run -d \
+            --name nammongodb \
+            -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=admin \
+            -e MONGO_INITDB_ROOT_PASSWORD=123456 \
+            mongo:8
+
+      - name: Wait for MongoDB
+        run: |
+          for i in {1..30}; do
+            if docker exec nammongodb \
+              mongosh --username admin \
+              --password 123456 \
+              --authenticationDatabase admin \
+              --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+              echo "MongoDB is ready"
+              break
+            fi
+
+            echo "Waiting for MongoDB..."
+            sleep 2
+          done
+
+      - name: Start Product API container
+        run: |
+          docker network create product-network
+
+          docker network connect product-network nammongodb
+
+          docker run -d \
+            --name product-api-container \
+            --network product-network \
+            -p 3000:3000 \
+            -e MONGO_URI=mongodb://admin:123456@nammongodb:27017/productdb?authSource=admin \
+            -e PORT=3000 \
+            ntruong05/product-api:latest
+
+      - name: Wait for Product API
+        run: |
+          for i in {1..30}; do
+            if curl --silent --fail http://localhost:3000/health; then
+              echo "Product API is healthy"
+              break
+            fi
+
+            echo "Waiting for Product API..."
+            sleep 2
+          done
+
+      - name: Verify Product API health
+        run: |
+          curl --fail http://localhost:3000/health
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ntruong05/product-api:latest
